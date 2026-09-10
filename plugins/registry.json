@@ -77,7 +77,7 @@
       "id": "Utility-G-code Generator",
       "name": "Utility G-code Generator",
       "description": "Generate utility G-code (surfacing, contour drilling, matrix, corner radius, oblong hole, threading) with live preview.",
-      "version": "1.0.2",
+      "version": "1.2.1",
       "author": "Franky464",
       "base": "https://raw.githubusercontent.com/figamore/FigUI/main/plugins/Utility-G-code_Generator/"
   }
