@@ -557,7 +557,7 @@ const I18N = {
     spindleSpeed: "Broche RPM",
     feedRate: "Avance (mm/min)",
     depthPerPass: "Prof. / passe",
-    totalDepth: "Prof. totale (mm) au diamètre",
+    totalDepth: "Prof. totale (mm)",
     surfacing: "Surfaçage",
     contourDrilling: "Perçage détourage",
     matrixDrilling: "Schéma perçage",
@@ -2134,54 +2134,80 @@ function genCorner(p) {
 function genOblong(p) {
   if (p.width < p.tool_diameter) throw new Error(tr('widthToolError'));
   if (p.depth_per_pass > p.total_depth) throw new Error(tr('depthPassError'));
+
   const numPassesZ = Math.ceil(p.total_depth / p.depth_per_pass);
-  const halfW = (p.width - p.tool_diameter) / 2, halfLx = p.length_x / 2, halfLy = p.length_y / 2;
+  const r       = (p.width - p.tool_diameter) / 2;
+  const tcHalfX = (p.length_x - p.tool_diameter) / 2;
+  const tcHalfY = (p.length_y - p.tool_diameter) / 2;
+  const halfLx  = tcHalfX - r;
+  const halfLy  = tcHalfY - r;
+
+  if (halfLx < 0 || halfLy < 0)
+    throw new Error('Corner radius too large for length_x/length_y');
+
   const plunge = p.feed_rate * p.plunge_percent / 100;
-  const conv = p.path_type === 'conventional';
+  const conv   = p.path_type === 'conventional';
   let g = [];
+
+  // Point de départ du contour (sur le segment droit inférieur)
+  const startMachX = p.start_x - halfLx;   // ex: -2.5
+  const startMachY = p.start_y - tcHalfY;  // ex: -30
+
   g.push('; Oblong hole');
   g.push('G90');
   g.push(`G00 Z${fmt(p.clearance_height)} F${Math.round(p.feed_rate)}`);
-  g.push(`G00 X${fmt(p.start_x)} Y${fmt(p.start_y)}  F${Math.round(p.feed_rate)}`);
+  g.push(`G00 X${fmt(p.start_x)} Y${fmt(p.start_y)} F${Math.round(p.feed_rate)}`);
+
+  // Aller directement au point de départ du contour en G0
+  g.push(`G00 X${fmt(startMachX)} Y${fmt(startMachY)} F${Math.round(p.feed_rate)}`);
+
   for (let i = 0; i < numPassesZ; i++) {
     const targetZ = p.start_z - Math.min((i + 1) * p.depth_per_pass, p.total_depth);
     g.push(`; Pass ${i + 1} at Z=${fmt(targetZ)}`);
+
+    // Plongée uniquement
+    g.push(`G01 Z${fmt(targetZ)} F${fmt(plunge)}`);
+
+    g.push('G91');
+
     if (conv) {
-      g.push('G90');
-      g.push(`G01 X${fmt(p.start_x)} Y${fmt(p.start_y - halfW)} F${Math.round(p.feed_rate)}`);
-      g.push(`G01 Z${fmt(targetZ)} F${fmt(plunge)}`);
-      g.push('G91');
-      g.push(`G01 X${fmt(-halfLx)} Y${fmt(-halfLy)}`);
-      g.push(`G02 X${fmt(-halfW)} Y${fmt(halfW)} I0.000 J${fmt(halfW)} F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X0.000 Y${fmt(p.length_y)} F${Math.round(p.feed_rate)}`);
-      g.push(`G02 X${fmt(halfW)} Y${fmt(halfW)} I${fmt(halfW)} J0.000 F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X${fmt(p.length_x)} Y0.000 F${Math.round(p.feed_rate)}`);
-      g.push(`G02 X${fmt(halfW)} Y${fmt(-halfW)} I0.000 J${fmt(-halfW)} F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X0.000 Y${fmt(-p.length_y)} F${Math.round(p.feed_rate)}`);
-      g.push(`G02 X${fmt(-halfW)} Y${fmt(-halfW)} I${fmt(-halfW)} J0.000 F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X${fmt(-p.length_x)} Y0.000 F${Math.round(p.feed_rate)}`);
-      g.push('G90');
+      // Conventional (G02) – sens horaire
+      // Départ : (-halfLx, -tcHalfY)
+      g.push(`G02 X${fmt(-r)} Y${fmt(r)} I0.000 J${fmt(r)} F${Math.round(p.feed_rate)}`);
+      g.push(`G01 X0.000 Y${fmt(2 * halfLy)} F${Math.round(p.feed_rate)}`);
+      g.push(`G02 X${fmt(r)} Y${fmt(r)} I${fmt(r)} J0.000 F${Math.round(p.feed_rate)}`);
+      g.push(`G01 X${fmt(2 * halfLx)} Y0.000 F${Math.round(p.feed_rate)}`);
+      g.push(`G02 X${fmt(r)} Y${fmt(-r)} I0.000 J${fmt(-r)} F${Math.round(p.feed_rate)}`);
+      g.push(`G01 X0.000 Y${fmt(-2 * halfLy)} F${Math.round(p.feed_rate)}`);
+      g.push(`G02 X${fmt(-r)} Y${fmt(-r)} I${fmt(-r)} J0.000 F${Math.round(p.feed_rate)}`);
+      g.push(`G01 X${fmt(-2 * halfLx)} Y0.000 F${Math.round(p.feed_rate)}`);
     } else {
-      g.push('G90');
-      g.push(`G01 X${fmt(p.start_x - halfW)} Y${fmt(p.start_y - p.length_y)} F${Math.round(p.feed_rate)}`);
-      g.push(`G01 Z${fmt(targetZ)} F${fmt(plunge)}`);
-      g.push('G91');
-      g.push(`G01 X${fmt(-halfLx)} Y${fmt(halfLy)}`);
-      g.push(`G03 X${fmt(halfW)} Y${fmt(-halfW)} I${fmt(halfW)} J0.000 F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X${fmt(p.length_x)} Y0.000 F${Math.round(p.feed_rate)}`);
-      g.push(`G03 X${fmt(halfW)} Y${fmt(halfW)} I0.000 J${fmt(halfW)} F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X0.000 Y${fmt(p.length_y)} F${Math.round(p.feed_rate)}`);
-      g.push(`G03 X${fmt(-halfW)} Y${fmt(halfW)} I${fmt(-halfW)} J0.000 F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X${fmt(-p.length_x)} Y0.000 F${Math.round(p.feed_rate)}`);
-      g.push(`G03 X${fmt(-halfW)} Y${fmt(-halfW)} I0.000 J${fmt(-halfW)} F${Math.round(p.feed_rate)}`);
-      g.push(`G01 X0.000 Y${fmt(-p.length_y)} F${Math.round(p.feed_rate)}`);
-      g.push('G90');
+      // Climb (G03) – sens anti-horaire
+      // Même point de départ
+      g.push(`G01 X${fmt(2 * halfLx)} Y0.000 F${Math.round(p.feed_rate)}`);
+      g.push(`G03 X${fmt(r)} Y${fmt(r)} I0.000 J${fmt(r)} F${Math.round(p.feed_rate)}`);
+      g.push(`G01 X0.000 Y${fmt(2 * halfLy)} F${Math.round(p.feed_rate)}`);
+      g.push(`G03 X${fmt(-r)} Y${fmt(r)} I${fmt(-r)} J0.000 F${Math.round(p.feed_rate)}`);
+      g.push(`G01 X${fmt(-2 * halfLx)} Y0.000 F${Math.round(p.feed_rate)}`);
+      g.push(`G03 X${fmt(-r)} Y${fmt(-r)} I0.000 J${fmt(-r)} F${Math.round(p.feed_rate)}`);
+      g.push(`G01 X0.000 Y${fmt(-2 * halfLy)} F${Math.round(p.feed_rate)}`);
+      g.push(`G03 X${fmt(r)} Y${fmt(-r)} I${fmt(r)} J0.000 F${Math.round(p.feed_rate)}`);
     }
+
+    g.push('G90');
   }
+
+  // Remontée UNIQUEMENT à la fin
   g.push(`G00 Z${fmt(p.clearance_height)} F${Math.round(p.feed_rate)}`);
-  g.push(`G00 X${fmt(p.start_x)} Y${fmt(p.start_y)}  F${Math.round(p.feed_rate)}`);
+  g.push(`G00 X${fmt(p.start_x)} Y${fmt(p.start_y)} F${Math.round(p.feed_rate)}`);
   g.push('G90');
-  return { body: g.join('\n'), stockX: p.length_x + p.tool_diameter, stockY: p.length_y + p.tool_diameter, stockZ: p.start_z + p.total_depth };
+
+  return {
+    body: g.join('\n'),
+    stockX: p.length_x + p.tool_diameter,
+    stockY: p.length_y + p.tool_diameter,
+    stockZ: p.start_z + p.total_depth
+  };
 }
 
 function genThreading(p) {
