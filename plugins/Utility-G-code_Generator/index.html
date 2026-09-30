@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Utility-G-code Generator v1.4.2</title>
+<title>Utility-G-code Generator v1.4.4</title>
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
 <style>
@@ -1032,7 +1032,7 @@ document.addEventListener("DOMContentLoaded", () => {
         <div><label data-i18n="feedRate">Avance (mm/min)</label><input type="number" id="feed_rate" value="1800" min="1" step="50"></div>
         <div><label data-i18n="spindleSpeed">Broche RPM</label><input type="number" id="spindle_speed" value="1000" min="0" step="100"></div>
       </div>
-      <div class="row3">
+      <div class="row3" id="tool-depth-row">
         <div><label data-i18n="toolDiameter">Ø outil (mm)</label><input type="number" id="tool_diameter" value="10" min="0.1" step="0.1"></div>
         <div><label data-i18n="depthPerPass">Prof. / passe</label><input type="number" id="depth_per_pass" value="1" min="0.01" step="0.1"></div>
         <div><label data-i18n="totalDepth">Prof. totale</label><input type="number" id="total_depth" value="2" min="0.01" step="0.1"></div>
@@ -1320,7 +1320,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <button class="action-btn" id="open-btn" onclick="openInViewer()" disabled data-i18n="openViewer">Ouvrir dans le figUI</button>
       <button class="action-btn" id="download-btn" onclick="downloadGCode()" disabled data-i18n="downloadGcode">Télécharger G-code</button>
       <button class="action-btn" id="help-btn" type="button">?</button>
-      <span class="app-version" id="app-version">v1.4.2</span>
+      <span class="app-version" id="app-version">v1.4.4</span>
       <span id="status"></span>
     </div>
   </div>
@@ -1328,7 +1328,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 <script>
 /** Version de l'application — à incrémenter à chaque modification significative */
-const APP_VERSION = '1.4.2';
+const APP_VERSION = '1.4.4';
 
 /* ========== FigUI bridge + fallback navigateur local ========== */
 let msgId = 0;
@@ -1336,21 +1336,31 @@ const pending = {};
 /** true si on tourne dans une iframe FigUI (parent ≠ self) */
 const IS_FIGUI = (window.parent && window.parent !== window);
 const LS_SETTINGS_KEY = 'utility-gcode-generator-settings';
-const CALL_TIMEOUT_MS = 800;
+/** Timeout court : settings (détection / fallback localStorage) */
+const CALL_TIMEOUT_MS = 3000;
+/** Timeout long : écriture / ouverture de fichiers G-code dans FigUI */
+const CALL_TIMEOUT_FILE_MS = 30000;
 
-function call(method, params) {
+/**
+ * Appel FigUI via postMessage.
+ * @param {string} method
+ * @param {object} [params]
+ * @param {number} [timeoutMs] — défaut CALL_TIMEOUT_MS ; utiliser CALL_TIMEOUT_FILE_MS pour write/load
+ */
+function call(method, params, timeoutMs) {
   return new Promise((resolve, reject) => {
     if (!IS_FIGUI) {
       reject(new Error('FigUI unavailable'));
       return;
     }
     const id = String(++msgId);
+    const ms = (typeof timeoutMs === 'number' && timeoutMs > 0) ? timeoutMs : CALL_TIMEOUT_MS;
     const timer = setTimeout(() => {
       if (pending[id]) {
         delete pending[id];
         reject(new Error('FigUI timeout'));
       }
-    }, CALL_TIMEOUT_MS);
+    }, ms);
     pending[id] = {
       resolve: (v) => { clearTimeout(timer); resolve(v); },
       reject: (e) => { clearTimeout(timer); reject(e); }
@@ -1421,6 +1431,8 @@ function showModePanel(op) {
   if (panel) panel.classList.remove('hidden');
   if (op === '3') updateMatrixLayoutUI();
   if (op === '7') updateSchemaLayoutUI();
+  const toolDepthRow = document.getElementById('tool-depth-row');
+  if (toolDepthRow) toolDepthRow.classList.toggle('hidden', op === '7');
 }
 
 /* ========== Conversion mm ↔ in ========== */
@@ -2819,18 +2831,19 @@ function genCorner(p) {
   g.push('; Ensure bit is tangeant to both edges X and Y');
   g.push(`G0 S${Math.round(p.spindle_speed)} F${feed}`);
   g.push(`G00 Z${fmt(p.clearance_height)} F${feed}`);
-  g.push('G90 ;Coord Absolute');
+  g.push('G90');
+  // Coin de la pièce = point de tangence outil
+  g.push(`G00 X${fmt(p.start_x)} Y${fmt(p.start_y)} F${feed}`);
+  // offsetCmd est un déplacement relatif depuis ce point
+  g.push('G91');
   g.push(`${fwd.offsetCmd} F${feed}`);
 
-  // Dégagement Z entre passes :
-  //   ARG + AVD en opposition ; ARD + AVG en avalant
-  //   jamais en mode Alterné
+  // Dégagement Z entre passes : ...
   const needZClearance = !isAlternate && (
     (!isClimb && (p.corner_type === 'rear_left' || p.corner_type === 'front_right')) ||
     ( isClimb && (p.corner_type === 'rear_right' || p.corner_type === 'front_left'))
   );
 
-  g.push('G91 ;Coord Relative');
   for (let i = 0; i < numPassesZ; i++) {
     const depth = Math.min(p.depth_per_pass, p.total_depth - i * p.depth_per_pass);
     const targetZ = p.start_z - (i * p.depth_per_pass + depth);
@@ -3349,7 +3362,8 @@ async function openInViewer() {
   try {
     await saveSettings();
     setStatus(tr('saving'), '');
-    await call('writeFile', { path, content: generatedCode, fs: 'sd' });
+    // Écriture / chargement : timeout long (le G-code peut être volumineux)
+    await call('writeFile', { path, content: generatedCode, fs: 'sd' }, CALL_TIMEOUT_FILE_MS);
     let loaded = false;
     for (const t of [
       { method: 'loadFile', params: { path, fs: 'sd' } },
@@ -3357,7 +3371,11 @@ async function openInViewer() {
       { method: 'loadGcode', params: { path, fs: 'sd' } },
       { method: 'previewFile', params: { path, fs: 'sd' } }
     ]) {
-      try { await call(t.method, t.params); loaded = true; break; } catch (_) {}
+      try {
+        await call(t.method, t.params, CALL_TIMEOUT_FILE_MS);
+        loaded = true;
+        break;
+      } catch (_) {}
     }
     setStatus(loaded ? tr('loadedInViewer') : tr('savedOpenFiles', { path }), 'ok');
     setTimeout(() => { try { call('close'); } catch (_) {} }, 400);
