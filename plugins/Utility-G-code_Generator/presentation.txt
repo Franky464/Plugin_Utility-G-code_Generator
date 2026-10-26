@@ -1,0 +1,159 @@
+# Utility G-code Generator
+
+**Version:** 1.4.5  
+**Type:** Single-file web app (HTML + CSS + JavaScript)  
+**Languages:** French / English (UI + help)  
+**Hosts:** Standalone browser **or** [FigUI](https://github.com/) plugin (iframe bridge)
+
+A self-contained utility that generates CNC **G-code** for common machining patterns, with a live **2D XY / XZ preview**, per-mode settings, and optional integration with FigUI.
+
+---
+
+## Features
+
+### Machining modes
+
+| # | Mode | Description |
+|---|------|-------------|
+| 1 | **Surfacing** | Rectangular facing with Z passes, overlap, conventional / climb / **alternating** paths, perimeter finish |
+| 2 | **Contour drilling** | Circular milling: through, blind (concentric), or outer diameter |
+| 3 | **Pattern drilling** | Rectangular grid or polar bolt circle, multi-pass Z |
+| 4 | **90° corner radius** | Fillet on a corner (AVG/AVD/ARD/ARG), conventional / climb / **alternating** (no Z retract between passes when alternating) |
+| 5 | **Oblong / slot** | Rounded slot; pure slot when tool Ø = width |
+| 6 | **Threading** | Helical thread milling (internal nut / external screw) |
+| 7 | **Create pattern** | Repeats config **1–6** on a rectangular or polar layout |
+
+### Preview
+
+- Split **XZ** + **XY** views with path colors (rapid / cut / plunge)
+- **Finished part** profile (blue dashed): rectangles, holes, contour circles, oblongs
+- **Zero point** marker and legend
+- Click a **G-code line** (or use ↑/↓) to show **tool position** at true tool diameter
+- View fitted to toolpath + finished geometry
+
+### G-code & export
+
+- Header with project, machine, stock bounds, app version
+- **Download `.nc`** from the browser
+- **Open in FigUI** viewer (write to `/sd/…` + load) when running as a plugin
+
+### Settings
+
+| Environment | Persistence |
+|-------------|-------------|
+| **FigUI** | Host `settings.json` + mirror in `localStorage` |
+| **Standalone browser** | `localStorage` only (browsers cannot write arbitrary files on disk) |
+
+Settings are stored **per operation mode**.
+
+### i18n & help
+
+- Full **FR / EN** UI strings and tooltips  
+- In-app **help** dialog per mode  
+
+---
+
+## Quick start
+
+### Browser (local)
+
+1. Put `index.html` (and optional `icon.png`) in a folder.  
+2. Open `index.html` in a modern browser.  
+3. Choose a mode, set parameters, generate G-code.  
+4. Use **Download G-code** for a `.nc` file.
+
+### FigUI plugin
+
+1. Install as a FigUI fluid/plugin page (same HTML).  
+2. Settings save via `postMessage` (`saveSettings` / `getSettings`).  
+3. **Open in viewer** uses `writeFile` + `loadFile` / `openFile` (longer timeout for large programs).
+
+---
+
+## Requirements
+
+- Modern browser with Canvas 2D and `localStorage`  
+- For FigUI: host that implements the fluid bridge (`fluid-request` / `fluid-response`)  
+- Units: **mm** (G21) or **inches** (G20)
+
+---
+
+## Architecture (for developers)
+
+Single file; main areas:
+
+| Area | Role |
+|------|------|
+| `genSurfacing` … `genSchema` | G-code generators per mode |
+| `parseGCodePaths` | Paths, arcs, plunges, **per-line tool positions** |
+| `drawPreview` / `drawView` | Canvas preview + finished profile + tool cursor |
+| `getProfileSide` / `buildPartGeometry` | Finished geometry (incl. mode 7 → source config) |
+| `call()` | FigUI bridge; optional timeout (`CALL_TIMEOUT_MS` / `CALL_TIMEOUT_FILE_MS`) |
+| `saveSettings` / `loadSettings` | FigUI and/or `localStorage` |
+| `I18N` / `TOOLTIPS` / `HELP_CONTENT` | Localization |
+
+**Version constant:**
+
+```js
+const APP_VERSION = '1.4.5';
+```
+
+Shown in the UI badge, document title, and G-code header comment.
+
+---
+
+## FigUI bridge notes
+
+```js
+const IS_FIGUI = (window.parent && window.parent !== window);
+```
+
+- **Not in iframe** → no FigUI; settings use `localStorage`; “open in viewer” is unavailable.  
+- **In FigUI** → `postMessage` API; file ops use a **30 s** timeout so large G-code does not hit a short settings timeout.
+
+---
+
+## Known limitations / tips
+
+- Mode **7 + corner (4)**: instance placement depends on how corner G-code is offset (relative moves); validate previews when patterning fillets.  
+- Standalone mode never updates a disk `settings.json`—only `localStorage` for that origin.  
+- Preview is a 2D approximation (not a full simulator).  
+- Always dry-run G-code on the machine controller before cutting.
+
+---
+
+## Contributing
+
+1. Fork and branch from the latest release.  
+2. Keep the app **single-file** unless there is a strong reason to split.  
+3. Bump `APP_VERSION` (semver: patch / minor / major).  
+4. Test: standalone browser **and** FigUI if possible.  
+5. Prefer clear FR+EN strings for any new UI text.  
+6. Open a PR with a short description of modes affected and how you tested.
+
+---
+
+## License
+
+*(Add your license here, e.g. MIT.)*
+
+---
+
+## Changelog (high level)
+
+| Version | Highlights |
+|---------|------------|
+| **1.4.x** | FigUI/local dual settings; longer file timeouts; G-code line → tool cursor; download button; favicon; contour finished circle; corner alternating path |
+| **1.3.x** | Part profile (blue dashed), legend, layout 1/4–3/4, mode 7 profile side from source |
+| Earlier | Core generators, dual-pane preview, i18n, help |
+
+---
+
+## Support
+
+- Issues: bug reports with **mode**, **parameters**, and sample G-code if possible  
+- Feature ideas: prefer scoped requests (one mode or one preview behavior)
+
+---
+
+You can drop this as `README.md` as-is, or trim the “Architecture / FigUI” sections for a shorter user-facing page and keep the rest in a `docs/DEVELOPERS.md`. If you want, I can also draft a shorter **Release notes for v1.4.4** only.
