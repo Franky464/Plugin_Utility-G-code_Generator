@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Utility-G-code Generator v1.4.5</title>
+<title>Utility-G-code Generator v1.4.6</title>
 <link rel="icon" type="image/png" href="icon.png">
 <link rel="apple-touch-icon" href="icon.png">
 <style>
@@ -1320,7 +1320,7 @@ document.addEventListener("DOMContentLoaded", () => {
       <button class="action-btn" id="open-btn" onclick="openInViewer()" disabled data-i18n="openViewer">Ouvrir dans le figUI</button>
       <button class="action-btn" id="download-btn" onclick="downloadGCode()" disabled data-i18n="downloadGcode">Télécharger G-code</button>
       <button class="action-btn" id="help-btn" type="button">?</button>
-      <span class="app-version" id="app-version">v1.4.5</span>
+      <span class="app-version" id="app-version">v1.4.6</span>
       <span id="status"></span>
     </div>
   </div>
@@ -1328,7 +1328,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 <script>
 /** Version de l'application — à incrémenter à chaque modification significative */
-const APP_VERSION = '1.4.5';
+const APP_VERSION = '1.4.6';
 
 /* ========== FigUI bridge + fallback navigateur local ========== */
 let msgId = 0;
@@ -2538,13 +2538,13 @@ function generateHeader(p, stockX, stockY, stockZ) {
     `; NC from Utility-G-code Generator v${APP_VERSION} (FigUI)`,
     '; ' + p.project_name, '; ' + now, '; ' + p.machine,
     `; (${fmt(stockX)}, ${fmt(stockY)}, ${fmt(stockZ)} ${p.global_units})`,
-    `${units} ;(${p.global_units})`, 'G90 ;Coord Absolute',
+    `${units} ; (${p.global_units})`, 'G90 ; Coord Absolute',
     ...startupLines,
     ''
   ].join('\n');
 }
 function footer(clearance) {
-  return [`G00 Z${fmt(clearance)}`, 'G0 X0 Y0', 'G90 ;Coord Absolute', 'M5', 'M30'].join('\n');
+  return [`G00 Z${fmt(clearance)}`, 'G00 X0 Y0', 'G90 ; Coord Absolute', 'M5', 'M30'].join('\n');
 }
 
 function genSurfacing(p) {
@@ -2614,7 +2614,7 @@ function genSurfacing(p) {
     g.push(`G01 X${fmt(xMax)} Y${fmt(yMin)} F${feed}`);
     g.push(`G01 X${fmt(xMax)} Y${fmt(endY)} F${feed}`);
     g.push(`G01 X${fmt(xMin)} Y${fmt(endY)} F${feed}`);
-    g.push(`G0 X${fmt(xMin)} Y${fmt(yMin)} Z${fmt(p.clearance_height)}`);
+    g.push(`G00 X${fmt(xMin)} Y${fmt(yMin)} Z${fmt(p.clearance_height)}`);
   } else {
     g.push(`G01 X${fmt(xMin)} Y${fmt(endY)} F${feed}`);
     g.push(`G01 X${fmt(xMax)} Y${fmt(endY)} F${feed}`);
@@ -2661,7 +2661,7 @@ function genContour(p) {
       let r = isBlind ? circleR - j * stepOver : circleR;
       if (isBlind && r < toolR) r = toolR;
       const tx = p.start_x + r;
-      g.push(`G00 X${fmt(tx)} Y${fmt(p.start_y)}`);
+      g.push(`G01 X${fmt(tx)} Y${fmt(p.start_y)}`);
       g.push(`G01 Z${fmt(currentZ)} F${fmt(plunge)}`);
       g.push(pathIsConv
         ? `G02 X${fmt(tx)} Y${fmt(p.start_y)} I${fmt(-r)} J0.000 F${Math.round(p.feed_rate)}`
@@ -2721,24 +2721,24 @@ function genMatrix(p) {
     }
   }
 
-  g.push(`G0 S${Math.round(p.spindle_speed)} F${Math.round(p.feed_rate)}`);
+  g.push(`G00 S${Math.round(p.spindle_speed)} F${Math.round(p.feed_rate)}`);
   g.push(`G00 Z${fmt(p.clearance_height)} F${Math.round(p.feed_rate)}`);
   if (holes.length) g.push(`G00 X${fmt(holes[0].x)} Y${fmt(holes[0].y)}`);
 
-for (const h of holes) {
-  g.push(`; Hole X=${fmt(h.x)} Y=${fmt(h.y)}`);
-  g.push(`G00 X${fmt(h.x)} Y${fmt(h.y)}`);
-  let currentZ = p.start_z;
-  let prevZ = p.start_z;
-  for (let k = 0; k < numPassesZ; k++) {
-    currentZ -= Math.min(p.depth_per_pass, p.total_depth - k * p.depth_per_pass);
-    if (k > 0) g.push(`G00 Z${fmt(prevZ + approachOffset)}`);
-    g.push(`G01 Z${fmt(currentZ)} F${fmt(plunge)}`);
-    prevZ = currentZ;
-    if (k < numPassesZ - 1) g.push(`G00 Z${fmt(p.clearance_height)}`);
+  for (const h of holes) {
+    g.push(`; Hole X=${fmt(h.x)} Y=${fmt(h.y)}`);
+    g.push(`G00 X${fmt(h.x)} Y${fmt(h.y)}`);
+    let currentZ = p.start_z;
+    let prevZ = p.start_z;
+    for (let k = 0; k < numPassesZ; k++) {
+      currentZ -= Math.min(p.depth_per_pass, p.total_depth - k * p.depth_per_pass);
+      if (k > 0) g.push(`G00 Z${fmt(prevZ + approachOffset)} ; approach`);
+      g.push(`G01 Z${fmt(currentZ)} F${fmt(plunge)} ; pass ${k + 1}`);
+      prevZ = currentZ;
+      if (k < numPassesZ - 1) g.push(`G00 Z${fmt(p.clearance_height)} ; clearance`);
+    }
+    g.push(`G00 Z${fmt(p.clearance_height)}; next`);  // ← toujours, y compris après 1 seule passe
   }
-  g.push(`G00 Z${fmt(p.clearance_height)}`);  // ← toujours, y compris après 1 seule passe
-}
 
   let stockX, stockY;
   if (isPolar) {
@@ -2850,11 +2850,11 @@ function genCorner(p) {
     const useRev = isAlternate && (i % 2 === 1);
     const mv = useRev ? rev : fwd;
     g.push(`; Pass ${i + 1} at Z=${fmt(targetZ)}` + (isAlternate ? (useRev ? ' (rev)' : ' (fwd)') : ''));
-    g.push('G90 ;Coord Absolute');
+    g.push('G90 ; Coord Absolute');
     g.push(`G01 Z${fmt(targetZ)} F${fmt(plunge)}`);
-    g.push('G91 ;Coord Relative');
+    g.push('G91 ; Coord Relative');
     g.push(mv.arcCmd);
-    g.push('G90 ;Coord Absolute');
+    g.push('G90 ; Coord Absolute');
     if (i < numPassesZ - 1) {
       if (isAlternate) {
         // Alterné : pas de retour XY ni dégagement Z — la passe suivante repart en sens inverse
@@ -2863,7 +2863,7 @@ function genCorner(p) {
       if (needZClearance) {
         g.push(`G00 Z${fmt(p.clearance_height)}`);
       }
-      g.push('G91 ;Coord Relative');
+      g.push('G91 ; Coord Relative');
       g.push(mv.returnX);
       g.push(mv.returnY);
     }
@@ -2899,7 +2899,7 @@ function genOblong(p) {
   const startMachY = p.start_y - tcHalfY;
 
   g.push('; Oblong hole');
-  g.push('G90 ;Coord Absolute');
+  g.push('G90 ; Coord Absolute');
   g.push(`G00 Z${fmt(p.clearance_height)} F${Math.round(p.feed_rate)}`);
   g.push(`G00 X${fmt(p.start_x)} Y${fmt(p.start_y)} F${Math.round(p.feed_rate)}`);
 
@@ -2920,7 +2920,7 @@ function genOblong(p) {
     // Plongée uniquement
     g.push(`G01 Z${fmt(targetZ)} F${fmt(plunge)}`);
 
-    g.push('G91 ;Coord Relative');
+    g.push('G91 ; Coord Relative');
 
     if (conv) {
       // Conventional (G02) – sens horaire
@@ -2944,13 +2944,13 @@ function genOblong(p) {
       g.push(`${arcPrefix}G03 X${fmt(r)} Y${fmt(-r)} I${fmt(r)} J0.000 F${Math.round(p.feed_rate)} ${arcSuffix}`);
     }
 
-    g.push('G90 ;Coord Absolute');
+    g.push('G90 ; Coord Absolute');
   }
 
   // Remontée UNIQUEMENT à la fin
  // g.push(`G00 Z${fmt(p.clearance_height)} F${Math.round(p.feed_rate)}`);
  // g.push(`G00 X${fmt(p.start_x)} Y${fmt(p.start_y)} F${Math.round(p.feed_rate)}`);
- // g.push('G90 ;Coord Absolute');
+ // g.push('G90 ; Coord Absolute');
 
   return {
     body: g.join('\n'),
@@ -3341,7 +3341,7 @@ function downloadGCode() {
   const safe = (p.project_name || 'test').replace(/[<>:"/\\|?*\s]+/g, '_');
   const names = { '1': 'surf', '2': 'contour', '3': 'matrix', '4': 'corner', '5': 'oblong', '6': 'thread', '7': 'schema' };
   const fname = (names[p.operation] || 'op') + '_' + safe + '.nc';
-  const blob = new Blob([generatedCode], { type: 'text/plain;charset=utf-8' });
+  const blob = new Blob([generatedCode], { type: 'text/plain; Charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
